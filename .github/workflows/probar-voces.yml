@@ -1,0 +1,45 @@
+name: Probar voces de Blu
+
+on:
+  workflow_dispatch:
+
+jobs:
+  voces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar espeak-ng y ffmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y espeak-ng ffmpeg
+
+      - name: Instalar Kokoro (torch solo CPU)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install kokoro soundfile
+
+      - name: Revisar la licencia publicada del modelo
+        run: |
+          mkdir -p salida
+          curl -sSL https://huggingface.co/hexgrad/Kokoro-82M/raw/main/README.md -o salida/model_card.md || true
+          grep -i -m5 "license" salida/model_card.md > salida/licencia.txt || echo "no se pudo leer la licencia" > salida/licencia.txt
+          cat salida/licencia.txt
+
+      - name: Generar muestras
+        run: python voices_test.py
+
+      - name: Convertir a mp3
+        run: |
+          for f in salida/*.wav; do ffmpeg -y -loglevel error -i "$f" -b:a 128k "${f%.wav}.mp3"; done
+          ls -la salida
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muestras-de-voz
+          path: salida/
