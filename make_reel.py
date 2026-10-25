@@ -28,7 +28,7 @@ def wav_info(path):
     return vals, sr, n / sr
 
 
-def speech_windows(vals, sr, step=0.06):
+def speech_windows(vals, sr, step=0.04):
     size = int(sr * step)
     rms = []
     for i in range(0, len(vals) - size, size):
@@ -36,7 +36,7 @@ def speech_windows(vals, sr, step=0.06):
         rms.append(math.sqrt(sum(v * v for v in seg) / size))
     if not rms:
         return []
-    thr = max(rms) * 0.22
+    thr = max(rms) * 0.30
     wins, start = [], None
     for k, r in enumerate(rms):
         t = k * step
@@ -48,7 +48,7 @@ def speech_windows(vals, sr, step=0.06):
         wins.append((start, len(rms) * step))
     merged = []
     for a, b in wins:
-        if merged and a - merged[-1][1] < 0.09:
+        if merged and a - merged[-1][1] < 0.05:
             merged[-1] = (merged[-1][0], b)
         else:
             merged.append((a, b))
@@ -90,6 +90,7 @@ def main():
     ap.add_argument("--hook", required=True)
     ap.add_argument("--lines", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--frames", help="folder with animated Blu frames (0000.png...) from blu_anim.py")
     a = ap.parse_args()
 
     vals, sr, dur = wav_info(a.audio)
@@ -98,6 +99,29 @@ def main():
     work = os.path.dirname(os.path.abspath(a.out))
     ass = os.path.join(work, "captions.ass")
     build_ass(a.hook, lines, dur, ass)
+
+    if a.frames:
+        bw, bh = 400, 487
+        graph = (
+            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[bg];"
+            f"[1:v]scale={bw}:{bh}[bl];"
+            f"[bg][bl]overlay={W - bw - 20}:{H - bh - 110}:shortest=1[v1];"
+            f"[v1]subtitles={ass}[v]"
+        )
+        gfile = os.path.join(work, "graph.txt")
+        with open(gfile, "w") as f:
+            f.write(graph)
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+               "-stream_loop", "-1", "-i", a.bg,
+               "-framerate", "30", "-i", os.path.join(a.frames, "%04d.png"),
+               "-i", a.audio,
+               "-filter_complex_script", gfile,
+               "-map", "[v]", "-map", "2:a", "-t", f"{dur:.2f}",
+               "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+               "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", a.out]
+        subprocess.run(cmd, check=True)
+        print(f"ok: {a.out} ({dur:.1f}s, Blu animado)")
+        return
 
     enable = "+".join(f"between(t,{x:.2f},{y:.2f})" for x, y in wins) or "0"
     x, y = W - BLU_W - 30, H - BLU_H - 120
